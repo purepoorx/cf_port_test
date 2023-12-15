@@ -3,9 +3,16 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"sync"
 )
 
+var mux = http.NewServeMux()
+var mu sync.Mutex
+
 func handler(w http.ResponseWriter, r *http.Request) {
+	mu.Lock()
+	defer mu.Unlock()
+
 	// 获取请求的端口号
 	port := r.URL.Port()
 
@@ -28,10 +35,10 @@ func main() {
 	for _, port := range ports {
 		go func(p string) {
 			// 设置路由处理函数
-			http.HandleFunc("/", handler)
+			mux.HandleFunc("/", handler)
 
 			// 启动Web服务监听指定端口
-			err := http.ListenAndServe(":"+p, nil)
+			err := http.ListenAndServe(":"+p, mux)
 			if err != nil {
 				fmt.Printf("启动Web服务失败：%v\n", err)
 			}
