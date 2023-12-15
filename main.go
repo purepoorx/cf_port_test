@@ -20,20 +20,20 @@ func handler(w http.ResponseWriter, r *http.Request, port string) {
 }
 
 func main() {
-	// 创建全局的http.ServeMux
-	mux := http.NewServeMux()
-
 	// 遍历指定的端口列表
 	ports := []string{"80", "8080", "8880", "2052", "2082", "2086", "2095", "443", "2053", "2083", "2087", "2096", "8443"}
 
-	// 注册路由处理函数
+	// 启动一个 goroutine 处理一个端口
 	for _, port := range ports {
-		p := port // 为了避免闭包中的迭代变量问题
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			handler(w, r, p)
-		})
-
 		go func(p string) {
+			// 创建每个端口的 ServeMux
+			mux := http.NewServeMux()
+
+			// 注册路由处理函数
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				handler(w, r, p)
+			})
+
 			// 启动Web服务监听指定端口
 			err := http.ListenAndServe(":"+p, mux)
 			if err != nil {
