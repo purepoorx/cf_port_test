@@ -83,7 +83,7 @@ jobs:
         if: matrix.goos == 'windows'
         run: |
           cd ./build_assets || exit 1
-          mv censys-${{ env.FILE_NAME }} cfporttest-${{ env.FILE_NAME }}.exe
+          mv cfporttest-${{ env.FILE_NAME }} cfporttest-${{ env.FILE_NAME }}.exe
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
