@@ -1,0 +1,10 @@
+[Unit]
+Description=cloudflare port test
+After=network.target
+
+[Service]
+ExecStart=/app/cfporttest
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
