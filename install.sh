@@ -106,7 +106,7 @@ function deploy() {
         sudo systemctl restart nginx
         
         # shellcheck disable=SC2086
-        "$HOME/.acme.sh/acme.sh" --issue --webroot /var/www/acme $ACME_DOMAINS_PARAMS --force
+        "$HOME/.acme.sh/acme.sh" --issue --webroot /var/www/acme $ACME_DOMAINS_PARAMS --force --server letsencrypt
 
     elif [ "$CERT_MODE" == "2" ]; then
         # --- DNS Mode ---
@@ -119,7 +119,7 @@ function deploy() {
         read -p "请输入环境变量: " DNS_ENV_VARS
 
         # shellcheck disable=SC2086
-        eval "export $DNS_ENV_VARS" "$HOME/.acme.sh/acme.sh" --issue --dns "$DNS_API" $ACME_DOMAINS_PARAMS --force
+        eval "export $DNS_ENV_VARS" "$HOME/.acme.sh/acme.sh" --issue --dns "$DNS_API" $ACME_DOMAINS_PARAMS --force --server letsencrypt
     else
         log "无效的选择。"; exit 1
     fi
@@ -180,7 +180,7 @@ function uninstall() {
         CERT_MAIN_DOMAIN=$(echo "$DOMAINS" | cut -d, -f1)
         ACME_DOMAINS_PARAMS="-d $(echo "$DOMAINS" | sed 's/,/ -d /g')"
         # shellcheck disable=SC2086
-        "$HOME/.acme.sh/acme.sh" --revoke $ACME_DOMAINS_PARAMS || true
+        "$HOME/.acme.sh/acme.sh" --revoke $ACME_DOMAINS_PARAMS --server letsencrypt || true
         # shellcheck disable=SC2086
         "$HOME/.acme.sh/acme.sh" --remove $ACME_DOMAINS_PARAMS || true
         sudo rm -rf "/etc/nginx/ssl/${CERT_MAIN_DOMAIN}.crt" "/etc/nginx/ssl/${CERT_MAIN_DOMAIN}.key"
