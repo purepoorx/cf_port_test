@@ -26,6 +26,7 @@ http {
     server {
         listen 80;
         listen [::]:80;
+        server_name {{DOMAINS}};
         location / {
             proxy_pass http://127.0.0.1:8888/80;
         }
@@ -82,8 +83,9 @@ http {
     server {
         listen 443 ssl;
         listen [::]:443 ssl;
-        ssl_certificate /root/cert.crt;
-        ssl_certificate_key /root/private.key;
+        server_name {{DOMAINS}};
+        ssl_certificate /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/privkey.pem;
         location / {
             proxy_pass http://127.0.0.1:8888/443;
         }
@@ -92,8 +94,9 @@ http {
     server {
         listen 2053 ssl;
         listen [::]:2053 ssl;
-        ssl_certificate /root/cert.crt;
-        ssl_certificate_key /root/private.key;
+        server_name {{DOMAINS}};
+        ssl_certificate /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/privkey.pem;
         location / {
             proxy_pass http://127.0.0.1:8888/2053;
         }
@@ -102,8 +105,9 @@ http {
     server {
         listen 2083 ssl;
         listen [::]:2083 ssl;
-        ssl_certificate /root/cert.crt;
-        ssl_certificate_key /root/private.key;
+        server_name {{DOMAINS}};
+        ssl_certificate /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/privkey.pem;
         location / {
             proxy_pass http://127.0.0.1:8888/2083;
         }
@@ -112,8 +116,9 @@ http {
     server {
         listen 2087 ssl;
         listen [::]:2087 ssl;
-        ssl_certificate /root/cert.crt;
-        ssl_certificate_key /root/private.key;
+        server_name {{DOMAINS}};
+        ssl_certificate /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/privkey.pem;
         location / {
             proxy_pass http://127.0.0.1:8888/2087;
         }
@@ -122,8 +127,9 @@ http {
     server {
         listen 2096 ssl;
         listen [::]:2096 ssl;
-        ssl_certificate /root/cert.crt;
-        ssl_certificate_key /root/private.key;
+        server_name {{DOMAINS}};
+        ssl_certificate /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/privkey.pem;
         location / {
             proxy_pass http://127.0.0.1:8888/2096;
         }
@@ -132,8 +138,9 @@ http {
     server {
         listen 8443 ssl;
         listen [::]:8443 ssl;
-        ssl_certificate /root/cert.crt;
-        ssl_certificate_key /root/private.key;
+        server_name {{DOMAINS}};
+        ssl_certificate /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/{{CERT_MAIN_DOMAIN}}/privkey.pem;
         location / {
             proxy_pass http://127.0.0.1:8888/8443;
         }
