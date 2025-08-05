@@ -28,7 +28,7 @@ function deploy() {
     read -p "请输入您的域名 (多个域名请用逗号分隔, 例如: domain1.com,www.domain1.com): " DOMAINS
     if [ -z "$DOMAINS" ]; then echo "错误：域名不能为空。"; exit 1; fi
 
-    read -p "请输入您的邮箱 (用于 Let's Encrypt 证书提醒): " EMAIL
+    read -p "请输入您的邮箱 (用于 acme.sh 注册): " EMAIL
     if [ -z "$EMAIL" ]; then echo "错误：邮箱不能为空。"; exit 1; fi
     
     read -p "请输入要安装的版本标签 (例如: v1.0.0, 直接回车则安装最新版): " TAG
@@ -44,17 +44,25 @@ function deploy() {
     else
         log "Nginx 已安装。"
     fi
-
-    if ! command_exists "certbot"; then
-        log "未找到 Certbot，正在通过 snap 安装..."
-        if command_exists apt-get; then sudo apt-get update && sudo apt-get install -y snapd;
-        elif command_exists yum; then sudo yum install -y snapd;
-        elif command_exists dnf; then sudo dnf install -y snapd; fi
-        sudo snap install --classic certbot
-        sudo ln -s /snap/bin/certbot /usr/bin/certbot
+    
+    if ! command_exists "socat"; then
+        log "未找到 socat (acme.sh 依赖)，正在安装..."
+        if command_exists apt-get; then sudo apt-get update && sudo apt-get install -y socat;
+        elif command_exists yum; then sudo yum install -y socat;
+        elif command_exists dnf; then sudo dnf install -y socat;
+        else log "错误：不支持的包管理器。请手动安装 socat。"; exit 1; fi
     else
-        log "Certbot 已安装。"
+        log "socat 已安装。"
     fi
+
+    if [ ! -f "$HOME/.acme.sh/acme.sh" ]; then
+        log "正在安装 acme.sh..."
+        curl https://get.acme.sh | sh -s email="$EMAIL"
+    else
+        log "acme.sh 已安装。"
+    fi
+    # shellcheck source=/dev/null
+    source "$HOME/.acme.sh/acme.sh.env"
 
     # --- 3. Download Application ---
     log "从 GitHub 下载应用..."
@@ -75,25 +83,70 @@ function deploy() {
     sudo systemctl daemon-reload
 
     # --- 5. Obtain SSL Certificate ---
-    log "申请 SSL 证书..."
-    sudo systemctl stop nginx
-    CERTBOT_DOMAINS=$(echo "$DOMAINS" | sed 's/,/ -d /g')
+    log "获取 SSL 证书..."
+    echo "请选择证书申请模式:"
+    echo "1. Webroot 模式 (推荐, 需要 80 端口可公网访问)"
+    echo "2. DNS 模式 (支持通配符, 需要 DNS 提供商 API Key)"
+    read -p "请输入您的选择 (1-2): " CERT_MODE
+
     CERT_MAIN_DOMAIN=$(echo "$DOMAINS" | cut -d, -f1)
-    sudo certbot certonly --standalone --non-interactive --agree-tos -m "$EMAIL" -d $CERTBOT_DOMAINS
+    ACME_DOMAINS_PARAMS=$(echo "$DOMAINS" | sed 's/,/ -d /g')
 
-    # --- 6. Configure Nginx ---
-    log "配置 Nginx..."
+    if [ "$CERT_MODE" == "1" ]; then
+        # --- Webroot Mode ---
+        log "使用 Webroot 模式..."
+        sudo mkdir -p /var/www/acme
+        # Pre-configure Nginx for ACME challenge
+        sudo curl -L -o "/etc/nginx/nginx.conf.template" "https://raw.githubusercontent.com/${GH_USER}/${GH_REPO}/main/nginx.conf.template"
+        if [ ! -f /etc/nginx/ssl/self-signed.crt ]; then
+            sudo mkdir -p /etc/nginx/ssl
+            sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/ssl/self-signed.key -out /etc/nginx/ssl/self-signed.crt -subj "/CN=localhost"
+        fi
+        TEMP_CONF=$(cat /etc/nginx/nginx.conf.template); TEMP_CONF=${TEMP_CONF//\{\{DOMAINS\}\}/$CERT_MAIN_DOMAIN}; TEMP_CONF=${TEMP_CONF//\{\{CERT_PATH\}\}/\/etc\/nginx\/ssl\/self-signed.crt}; TEMP_CONF=${TEMP_CONF//\{\{KEY_PATH\}\}/\/etc\/nginx\/ssl\/self-signed.key}; echo "$TEMP_CONF" | sudo tee /etc/nginx/nginx.conf > /dev/null
+        sudo systemctl restart nginx
+        
+        # shellcheck disable=SC2086
+        "$HOME/.acme.sh/acme.sh" --issue --webroot /var/www/acme $ACME_DOMAINS_PARAMS --force
+
+    elif [ "$CERT_MODE" == "2" ]; then
+        # --- DNS Mode ---
+        log "使用 DNS 模式..."
+        read -p "请输入您的 DNS 提供商 API (例如: dns_cf for Cloudflare): " DNS_API
+        if [ -z "$DNS_API" ]; then echo "错误: DNS API 不能为空。"; exit 1; fi
+        
+        echo "请输入 DNS API 所需的环境变量 (例如: CF_Key=\"your_key\" CF_Email=\"your_email\")"
+        echo "请参考 acme.sh 文档了解您的提供商需要哪些变量: https://github.com/acmesh-official/acme.sh/wiki/dnsapi"
+        read -p "请输入环境变量: " DNS_ENV_VARS
+
+        # shellcheck disable=SC2086
+        eval "export $DNS_ENV_VARS" "$HOME/.acme.sh/acme.sh" --issue --dns "$DNS_API" $ACME_DOMAINS_PARAMS --force
+    else
+        log "无效的选择。"; exit 1
+    fi
+
+    # --- 6. Install Certificate and Configure Nginx ---
+    log "安装证书并配置 Nginx..."
+    CERT_PATH="/etc/nginx/ssl/${CERT_MAIN_DOMAIN}.crt"
+    KEY_PATH="/etc/nginx/ssl/${CERT_MAIN_DOMAIN}.key"
+    sudo mkdir -p /etc/nginx/ssl
+    # shellcheck disable=SC2086
+    "$HOME/.acme.sh/acme.sh" --install-cert -d "$CERT_MAIN_DOMAIN" \
+        --key-file       "$KEY_PATH" \
+        --fullchain-file "$CERT_PATH" \
+        --reloadcmd      "sudo systemctl restart nginx"
+
     sudo curl -L -o "/etc/nginx/nginx.conf.template" "https://raw.githubusercontent.com/${GH_USER}/${GH_REPO}/main/nginx.conf.template"
-    TEMP_CONF=$(cat /etc/nginx/nginx.conf.template)
-    TEMP_CONF=${TEMP_CONF//\{\{DOMAINS\}\}/$DOMAINS}
-    TEMP_CONF=${TEMP_CONF//\{\{CERT_MAIN_DOMAIN\}\}/$CERT_MAIN_DOMAIN}
-    echo "$TEMP_CONF" | sudo tee /etc/nginx/nginx.conf > /dev/null
-
+    FINAL_CONF=$(cat /etc/nginx/nginx.conf.template)
+    FINAL_CONF=${FINAL_CONF//\{\{DOMAINS\}\}/$DOMAINS}
+    FINAL_CONF=${FINAL_CONF//\{\{CERT_PATH\}\}/$CERT_PATH}
+    FINAL_CONF=${FINAL_CONF//\{\{KEY_PATH\}\}/$KEY_PATH}
+    echo "$FINAL_CONF" | sudo tee /etc/nginx/nginx.conf > /dev/null
+    
     # --- 7. Start Services ---
     log "启动服务..."
     sudo systemctl start "${SERVICE_NAME}.service"
     sudo systemctl enable "${SERVICE_NAME}.service"
-    sudo systemctl start nginx
+    sudo systemctl restart nginx
     sudo systemctl enable nginx
 
     log "部署成功！"
@@ -103,55 +156,46 @@ function deploy() {
 function uninstall() {
     log "开始卸载..."
 
-    # --- 1. Gather Information ---
     read -p "请输入您要卸载的域名 (必须与安装时一致): " DOMAINS
     if [ -z "$DOMAINS" ]; then echo "错误：域名不能为空。"; exit 1; fi
     
-    read -p "是否要彻底清除 Nginx 和 Certbot? (y/N): " PURGE_CHOICE
+    read -p "是否要彻底清除 Nginx 和 acme.sh? (y/N): " PURGE_CHOICE
     PURGE=false
     if [[ "$PURGE_CHOICE" == "y" || "$PURGE_CHOICE" == "Y" ]]; then
         PURGE=true
     fi
 
-    # --- 2. Stop and Disable Services ---
-    log "停止并禁用服务..."
-    sudo systemctl stop "${SERVICE_NAME}.service" || echo "服务 ${SERVICE_NAME} 未运行。"
-    sudo systemctl disable "${SERVICE_NAME}.service" || echo "服务 ${SERVICE_NAME} 未启用。"
-    sudo systemctl stop nginx || echo "Nginx 未运行。"
-    sudo systemctl disable nginx || echo "Nginx 未启用。"
+    sudo systemctl stop "${SERVICE_NAME}.service" || true
+    sudo systemctl disable "${SERVICE_NAME}.service" || true
+    sudo systemctl stop nginx || true
 
-    # --- 3. Remove Application Files ---
-    log "移除应用文件..."
     if [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
-        sudo rm "/etc/systemd/system/${SERVICE_NAME}.service"
-        log "已移除 systemd 服务文件。"
+        sudo rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
         sudo systemctl daemon-reload
     fi
-    if [ -d "$INSTALL_DIR" ]; then sudo rm -rf "$INSTALL_DIR"; log "已移除应用目录。"; fi
+    sudo rm -rf "$INSTALL_DIR"
+    sudo rm -f /etc/nginx/nginx.conf
 
-    # --- 4. Remove Nginx Configuration ---
-    if [ -f "/etc/nginx/nginx.conf" ]; then sudo rm /etc/nginx/nginx.conf; log "已移除 nginx.conf。"; fi
-
-    # --- 5. Delete SSL Certificate ---
-    if command_exists "certbot"; then
-        log "删除 SSL 证书..."
+    if [ -f "$HOME/.acme.sh/acme.sh" ]; then
         CERT_MAIN_DOMAIN=$(echo "$DOMAINS" | cut -d, -f1)
-        if sudo certbot certificates | grep -q "Certificate Name: ${CERT_MAIN_DOMAIN}"; then
-            sudo certbot delete --cert-name "$CERT_MAIN_DOMAIN" --non-interactive
-        else
-            log "未找到域名 ${CERT_MAIN_DOMAIN} 的证书。"
-        fi
+        ACME_DOMAINS_PARAMS=$(echo "$DOMAINS" | sed 's/,/ -d /g')
+        # shellcheck disable=SC2086
+        "$HOME/.acme.sh/acme.sh" --revoke $ACME_DOMAINS_PARAMS || true
+        # shellcheck disable=SC2086
+        "$HOME/.acme.sh/acme.sh" --remove $ACME_DOMAINS_PARAMS || true
+        sudo rm -rf "/etc/nginx/ssl/${CERT_MAIN_DOMAIN}.crt" "/etc/nginx/ssl/${CERT_MAIN_DOMAIN}.key"
     fi
 
-    # --- 6. Purge Dependencies (Optional) ---
     if [ "$PURGE" = true ]; then
-        log "彻底清除依赖..."
         if command_exists "nginx"; then
             if command_exists apt-get; then sudo apt-get purge -y nginx nginx-common;
             elif command_exists yum; then sudo yum remove -y nginx;
             elif command_exists dnf; then sudo dnf remove -y nginx; fi
         fi
-        if command_exists "certbot"; then sudo snap remove certbot; fi
+        if [ -d "$HOME/.acme.sh" ]; then
+            "$HOME/.acme.sh/acme.sh" --uninstall
+            sudo rm -rf "$HOME/.acme.sh"
+        fi
     fi
 
     log "卸载成功！"
@@ -164,14 +208,7 @@ echo "2. 卸载应用"
 read -p "请选择您要执行的操作 (1-2): " ACTION_CHOICE
 
 case "$ACTION_CHOICE" in
-    1)
-        deploy
-        ;;
-    2)
-        uninstall
-        ;;
-    *)
-        echo "无效的选择。"
-        exit 1
-        ;;
+    1) deploy ;;
+    2) uninstall ;;
+    *) echo "无效的选择。"; exit 1 ;;
 esac
