@@ -90,7 +90,7 @@ function deploy() {
     read -p "请输入您的选择 (1-2): " CERT_MODE
 
     CERT_MAIN_DOMAIN=$(echo "$DOMAINS" | cut -d, -f1)
-    ACME_DOMAINS_PARAMS=$(echo "$DOMAINS" | sed 's/,/ -d /g')
+    ACME_DOMAINS_PARAMS="-d $(echo "$DOMAINS" | sed 's/,/ -d /g')"
 
     if [ "$CERT_MODE" == "1" ]; then
         # --- Webroot Mode ---
@@ -178,7 +178,7 @@ function uninstall() {
 
     if [ -f "$HOME/.acme.sh/acme.sh" ]; then
         CERT_MAIN_DOMAIN=$(echo "$DOMAINS" | cut -d, -f1)
-        ACME_DOMAINS_PARAMS=$(echo "$DOMAINS" | sed 's/,/ -d /g')
+        ACME_DOMAINS_PARAMS="-d $(echo "$DOMAINS" | sed 's/,/ -d /g')"
         # shellcheck disable=SC2086
         "$HOME/.acme.sh/acme.sh" --revoke $ACME_DOMAINS_PARAMS || true
         # shellcheck disable=SC2086
