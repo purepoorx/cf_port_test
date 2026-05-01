@@ -28,6 +28,7 @@ WARP_APT_SOURCE_PATH="/etc/apt/sources.list.d/cloudflare-client.list"
 SUDO=""
 LAST_LOG_MESSAGE=""
 IPV6_ONLY="${IPV6_ONLY:-0}"
+ROOT_HOME="${ROOT_HOME:-/root}"
 
 log() {
     LAST_LOG_MESSAGE="$1"
@@ -112,17 +113,14 @@ command_exists() {
 }
 
 require_root_or_sudo() {
-    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+    if [ "$(id -u)" -eq 0 ]; then
         SUDO=""
+        HOME="$ROOT_HOME"
+        export HOME
         return
     fi
 
-    if command_exists sudo; then
-        SUDO="sudo"
-        return
-    fi
-
-    die "Run this script as root, or install sudo before continuing."
+    die "Run this script as root with sudo ./install.sh."
 }
 
 run_as_root() {
@@ -141,9 +139,21 @@ download_to() {
     local temp_file
 
     temp_file="$(mktemp)"
-    curl -fsSL "$url" -o "$temp_file"
-    run_as_root mkdir -p "$(dirname "$destination")"
-    run_as_root install -m "$mode" "$temp_file" "$destination"
+    if ! curl -fsSL "$url" -o "$temp_file"; then
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    if ! run_as_root mkdir -p "$(dirname "$destination")"; then
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    if ! run_as_root install -m "$mode" "$temp_file" "$destination"; then
+        rm -f "$temp_file"
+        return 1
+    fi
+
     rm -f "$temp_file"
 }
 
@@ -294,29 +304,65 @@ validate_domain() {
     [[ "$domain" =~ ^(\*\.)?([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$ ]] || die "Domain format is invalid: ${domain}"
 }
 
+trim() {
+    local value="$1"
+
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+
+cert_file_stem() {
+    local domain="$1"
+
+    if [[ "$domain" == \*.* ]]; then
+        printf 'wildcard.%s\n' "${domain#*.}"
+        return
+    fi
+
+    printf '%s\n' "$domain"
+}
+
+ensure_webroot_compatible_domains() {
+    local domain
+
+    for domain in "${NORMALIZED_DOMAINS[@]}"; do
+        if [[ "$domain" == \*.* ]]; then
+            die "Wildcard domains require DNS mode. Choose DNS mode to issue certificates for ${domain}."
+        fi
+    done
+}
+
 normalize_domains() {
     local domain
     local nginx_domains=()
+    local normalized_domains=()
 
-    DOMAINS="$(printf '%s' "$DOMAINS" | tr -d '[:space:]')"
+    DOMAINS="$(trim "$DOMAINS")"
     [ -n "$DOMAINS" ] || die "The domain list cannot be empty."
 
     IFS=',' read -r -a domains_array <<< "$DOMAINS"
     ACME_DOMAINS=()
     CERT_MAIN_DOMAIN=""
+    NORMALIZED_DOMAINS=()
     NGINX_DOMAINS=""
 
     for domain in "${domains_array[@]}"; do
+        domain="$(trim "$domain")"
         [ -n "$domain" ] || continue
+        [[ "$domain" != *[[:space:]]* ]] || die "Domain must not contain whitespace: ${domain}"
         validate_domain "$domain"
         ACME_DOMAINS+=("-d" "$domain")
         nginx_domains+=("$domain")
+        normalized_domains+=("$domain")
         if [ -z "$CERT_MAIN_DOMAIN" ]; then
             CERT_MAIN_DOMAIN="$domain"
         fi
     done
 
     [ "${#ACME_DOMAINS[@]}" -gt 0 ] || die "At least one valid domain is required."
+    NORMALIZED_DOMAINS=("${normalized_domains[@]}")
+    DOMAINS="$(IFS=,; printf '%s' "${NORMALIZED_DOMAINS[*]}")"
     NGINX_DOMAINS="${nginx_domains[*]}"
 }
 
@@ -777,6 +823,7 @@ issue_certificate() {
 
     if [ "$cert_mode" = "1" ]; then
         log "Using webroot mode..."
+        ensure_webroot_compatible_domains
         run_as_root mkdir -p "$ACME_WEBROOT"
         download_repo_file "$RELEASE_REF" "nginx.conf.template" "$NGINX_TEMPLATE_PATH"
         create_self_signed_cert
@@ -801,8 +848,10 @@ issue_certificate() {
 }
 
 install_certificate_and_nginx() {
-    local cert_path="${SSL_DIR}/${CERT_MAIN_DOMAIN}.crt"
-    local key_path="${SSL_DIR}/${CERT_MAIN_DOMAIN}.key"
+    local cert_stem
+    cert_stem="$(cert_file_stem "$CERT_MAIN_DOMAIN")"
+    local cert_path="${SSL_DIR}/${cert_stem}.crt"
+    local key_path="${SSL_DIR}/${cert_stem}.key"
     local reload_cmd="systemctl restart nginx"
 
     if [ -n "$SUDO" ]; then
