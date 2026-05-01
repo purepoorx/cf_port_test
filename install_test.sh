@@ -345,6 +345,65 @@ test_first_redirect_location_tolerates_early_pipeline_close() {
     assert_eq "$got" "https://github.com/purepoorx/cf_port_test/releases/download/v1.2.3/cfporttest" "first_redirect_location should ignore harmless SIGPIPE from early Location match"
 }
 
+test_setup_service_downloads_support_file_from_support_ref() {
+    source_installer
+
+    RELEASE_REF="v1.0.1"
+    SUPPORT_FILES_REF="main"
+    local captured=""
+
+    run_as_root() {
+        return 0
+    }
+
+    download_repo_file() {
+        captured="$1|$2|$3"
+    }
+
+    setup_service
+
+    assert_eq "$captured" "main|cfport.service|${SYSTEMD_SERVICE_PATH}" "systemd service should be downloaded from support files ref, not binary release ref"
+}
+
+test_install_certificate_downloads_nginx_template_from_support_ref() {
+    source_installer
+
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+    local acme_bin="${temp_dir}/acme.sh"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$acme_bin"
+    chmod +x "$acme_bin"
+
+    ACME_BIN="$acme_bin"
+    SSL_DIR="${temp_dir}/ssl"
+    CERT_MAIN_DOMAIN="example.com"
+    NGINX_DOMAINS="example.com"
+    RELEASE_REF="v1.0.1"
+    SUPPORT_FILES_REF="main"
+    local captured=""
+
+    run_as_root() {
+        "$@"
+    }
+
+    download_repo_file() {
+        captured="$1|$2|$3"
+    }
+
+    render_nginx_conf() {
+        return 0
+    }
+
+    validate_and_reload_nginx() {
+        return 0
+    }
+
+    install_certificate_and_nginx
+
+    assert_eq "$captured" "main|nginx.conf.template|${NGINX_TEMPLATE_PATH}" "nginx template should be downloaded from support files ref, not binary release ref"
+    rm -rf "$temp_dir"
+}
+
 run_tests() {
     local test_name
 
@@ -371,4 +430,6 @@ run_tests \
     test_remove_nginx_config_files_keeps_main_config \
     test_restore_resolver_config_restores_managed_backup \
     test_restore_resolver_config_skips_unmanaged_resolver \
-    test_first_redirect_location_tolerates_early_pipeline_close
+    test_first_redirect_location_tolerates_early_pipeline_close \
+    test_setup_service_downloads_support_file_from_support_ref \
+    test_install_certificate_downloads_nginx_template_from_support_ref

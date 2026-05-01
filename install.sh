@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 GH_USER="purepoorx"
 GH_REPO="cf_port_test"
+SUPPORT_FILES_REF="${SUPPORT_FILES_REF:-main}"
 INSTALL_DIR="/app"
 SERVICE_NAME="cfporttest"
 SYSTEMD_SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -800,8 +801,8 @@ remove_nginx_config_files() {
 
 setup_service() {
     log "Configuring systemd service..."
-    run_as_root systemctl stop "${SERVICE_NAME}.service" || true
-    download_repo_file "$RELEASE_REF" "cfport.service" "$SYSTEMD_SERVICE_PATH"
+    run_as_root systemctl stop "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
+    download_repo_file "$SUPPORT_FILES_REF" "cfport.service" "$SYSTEMD_SERVICE_PATH"
     run_as_root systemctl daemon-reload
 }
 
@@ -860,7 +861,7 @@ issue_certificate() {
         log "Using webroot mode..."
         ensure_webroot_compatible_domains
         run_as_root mkdir -p "$ACME_WEBROOT"
-        download_repo_file "$RELEASE_REF" "nginx.conf.template" "$NGINX_TEMPLATE_PATH"
+        download_repo_file "$SUPPORT_FILES_REF" "nginx.conf.template" "$NGINX_TEMPLATE_PATH"
         create_self_signed_cert
         render_nginx_conf "$NGINX_DOMAINS" "${SSL_DIR}/self-signed.crt" "${SSL_DIR}/self-signed.key"
         validate_and_reload_nginx
@@ -900,7 +901,7 @@ install_certificate_and_nginx() {
         --fullchain-file "$cert_path" \
         --reloadcmd "$reload_cmd"
 
-    download_repo_file "$RELEASE_REF" "nginx.conf.template" "$NGINX_TEMPLATE_PATH"
+    download_repo_file "$SUPPORT_FILES_REF" "nginx.conf.template" "$NGINX_TEMPLATE_PATH"
     render_nginx_conf "$NGINX_DOMAINS" "$cert_path" "$key_path"
     validate_and_reload_nginx
 }
