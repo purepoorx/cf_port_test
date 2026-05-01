@@ -424,6 +424,10 @@ test_validate_acme_http_challenge_path_fails_on_public_mismatch() {
         local token="${url##*/}"
 
         if [[ "$args" == *"--resolve"* ]]; then
+            if [[ "$args" != *"--noproxy *"* ]]; then
+                printf 'proxy intercepted local probe'
+                return
+            fi
             cat "${ACME_WEBROOT}/.well-known/acme-challenge/${token}"
             return
         fi
@@ -437,6 +441,7 @@ test_validate_acme_http_challenge_path_fails_on_public_mismatch() {
     fi
 
     assert_contains "$output" "Public ACME challenge probe returned unexpected content" "public mismatch error should explain the failed layer"
+    assert_contains "$output" "got: not found" "public mismatch error should include the unexpected body"
     rm -rf "$temp_dir"
 }
 
@@ -453,6 +458,11 @@ test_validate_acme_http_challenge_path_passes_when_local_and_public_match() {
     }
 
     curl() {
+        local args="$*"
+        if [[ "$args" != *"--noproxy *"* ]]; then
+            printf 'proxy intercepted probe'
+            return
+        fi
         local url="${*: -1}"
         local token="${url##*/}"
         cat "${ACME_WEBROOT}/.well-known/acme-challenge/${token}"
