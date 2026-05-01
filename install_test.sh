@@ -30,12 +30,32 @@ assert_contains() {
     esac
 }
 
+assert_not_contains() {
+    local haystack="$1"
+    local needle="$2"
+    local message="$3"
+
+    case "$haystack" in
+        *"$needle"*) fail "${message}: output should not contain '${needle}'" ;;
+        *) ;;
+    esac
+}
+
 assert_file_missing() {
     local path="$1"
     local message="$2"
 
     if [ -e "$path" ]; then
         fail "${message}: '${path}' still exists"
+    fi
+}
+
+assert_file_exists() {
+    local path="$1"
+    local message="$2"
+
+    if [ ! -e "$path" ]; then
+        fail "${message}: '${path}' is missing"
     fi
 }
 
@@ -204,6 +224,66 @@ test_download_to_removes_temp_file_on_failure() {
     rmdir "$temp_dir"
 }
 
+test_nginx_defaults_use_conf_d_app_config() {
+    source_installer
+
+    assert_eq "${NGINX_MAIN_CONFIG_PATH:-}" "/etc/nginx/nginx.conf" "nginx main config path should be explicit"
+    assert_eq "$NGINX_CONFIG_PATH" "/etc/nginx/conf.d/cfporttest.conf" "installer should manage only its conf.d file"
+    assert_eq "$NGINX_TEMPLATE_PATH" "/etc/nginx/cfporttest.conf.template" "installer template should not masquerade as nginx.conf"
+}
+
+test_nginx_template_is_conf_d_fragment() {
+    local template
+    template="$(cat "${ROOT_DIR}/nginx.conf.template")"
+
+    assert_contains "$template" "server {" "nginx fragment should contain server blocks"
+    assert_not_contains "$template" "worker_processes" "nginx fragment should not contain global directives"
+    assert_not_contains "$template" "events {" "nginx fragment should not contain an events block"
+    assert_not_contains "$template" "http {" "nginx fragment should not contain an http block"
+}
+
+test_validate_nginx_conf_d_include_rejects_missing_include() {
+    source_installer
+
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+    NGINX_MAIN_CONFIG_PATH="${temp_dir}/nginx.conf"
+    printf 'events {}\nhttp {}\n' > "$NGINX_MAIN_CONFIG_PATH"
+
+    local output=""
+    if output="$(validate_nginx_conf_d_include 2>&1)"; then
+        fail "nginx main config without conf.d include should be rejected"
+    fi
+
+    assert_contains "$output" "conf.d/*.conf" "missing include error should name the required include"
+    rm -rf "$temp_dir"
+}
+
+test_remove_nginx_config_files_keeps_main_config() {
+    source_installer
+
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+    NGINX_MAIN_CONFIG_PATH="${temp_dir}/nginx.conf"
+    NGINX_TEMPLATE_PATH="${temp_dir}/cfporttest.conf.template"
+    NGINX_CONFIG_PATH="${temp_dir}/conf.d/cfporttest.conf"
+    mkdir -p "$(dirname "$NGINX_CONFIG_PATH")"
+    printf 'main\n' > "$NGINX_MAIN_CONFIG_PATH"
+    printf 'template\n' > "$NGINX_TEMPLATE_PATH"
+    printf 'app\n' > "$NGINX_CONFIG_PATH"
+
+    run_as_root() {
+        "$@"
+    }
+
+    remove_nginx_config_files
+
+    assert_file_exists "$NGINX_MAIN_CONFIG_PATH" "removing app config must keep nginx main config"
+    assert_file_missing "$NGINX_TEMPLATE_PATH" "installer template should be removed"
+    assert_file_missing "$NGINX_CONFIG_PATH" "app nginx config should be removed"
+    rm -rf "$temp_dir"
+}
+
 run_tests() {
     local test_name
 
@@ -223,4 +303,8 @@ run_tests \
     test_normalize_domains_rejects_internal_whitespace \
     test_cert_file_stem_sanitizes_wildcard_domain \
     test_webroot_rejects_wildcard_domains \
-    test_download_to_removes_temp_file_on_failure
+    test_download_to_removes_temp_file_on_failure \
+    test_nginx_defaults_use_conf_d_app_config \
+    test_nginx_template_is_conf_d_fragment \
+    test_validate_nginx_conf_d_include_rejects_missing_include \
+    test_remove_nginx_config_files_keeps_main_config

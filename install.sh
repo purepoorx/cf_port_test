@@ -7,8 +7,10 @@ GH_REPO="cf_port_test"
 INSTALL_DIR="/app"
 SERVICE_NAME="cfporttest"
 SYSTEMD_SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
-NGINX_TEMPLATE_PATH="/etc/nginx/nginx.conf.template"
-NGINX_CONFIG_PATH="/etc/nginx/nginx.conf"
+NGINX_MAIN_CONFIG_PATH="/etc/nginx/nginx.conf"
+NGINX_CONFIG_DIR="/etc/nginx/conf.d"
+NGINX_TEMPLATE_PATH="/etc/nginx/cfporttest.conf.template"
+NGINX_CONFIG_PATH="${NGINX_CONFIG_DIR}/cfporttest.conf"
 SSL_DIR="/etc/nginx/ssl"
 ACME_WEBROOT="/var/www/acme"
 RESOLV_CONF_PATH="/etc/resolv.conf"
@@ -757,10 +759,26 @@ render_nginx_conf() {
     printf '%s\n' "$template" | run_as_root tee "$NGINX_CONFIG_PATH" >/dev/null
 }
 
-validate_and_reload_nginx() {
+validate_nginx_conf_d_include() {
+    [ -f "$NGINX_MAIN_CONFIG_PATH" ] || die "Nginx main config is missing: ${NGINX_MAIN_CONFIG_PATH}"
+
+    grep -Eq 'include[[:space:]]+(/etc/nginx/)?conf\.d/\*\.conf;' "$NGINX_MAIN_CONFIG_PATH" \
+        || die "Nginx main config must include /etc/nginx/conf.d/*.conf before cfporttest can install a conf.d fragment."
+}
+
+reload_nginx() {
     run_as_root nginx -t
-    run_as_root systemctl restart nginx
+    run_as_root systemctl reload nginx || run_as_root systemctl restart nginx
+}
+
+validate_and_reload_nginx() {
+    validate_nginx_conf_d_include
+    reload_nginx
     run_as_root systemctl enable nginx
+}
+
+remove_nginx_config_files() {
+    run_as_root rm -f "$NGINX_CONFIG_PATH" "$NGINX_TEMPLATE_PATH"
 }
 
 setup_service() {
@@ -924,7 +942,6 @@ uninstall() {
 
     run_as_root systemctl stop "${SERVICE_NAME}.service" || true
     run_as_root systemctl disable "${SERVICE_NAME}.service" || true
-    run_as_root systemctl stop nginx || true
 
     if [ -f "$SYSTEMD_SERVICE_PATH" ]; then
         run_as_root rm -f "$SYSTEMD_SERVICE_PATH"
@@ -933,7 +950,10 @@ uninstall() {
 
     run_as_root rm -f "${INSTALL_DIR}/${SERVICE_NAME}"
     run_as_root rmdir "$INSTALL_DIR" 2>/dev/null || true
-    run_as_root rm -f "$NGINX_CONFIG_PATH" "$NGINX_TEMPLATE_PATH"
+    remove_nginx_config_files
+    if command_exists nginx; then
+        reload_nginx || true
+    fi
 
     if [ -x "${HOME}/.acme.sh/acme.sh" ]; then
         "${HOME}/.acme.sh/acme.sh" --revoke "${ACME_DOMAINS[@]}" --server letsencrypt || true
