@@ -326,6 +326,25 @@ test_restore_resolver_config_skips_unmanaged_resolver() {
     rm -rf "$temp_dir"
 }
 
+test_first_redirect_location_tolerates_early_pipeline_close() {
+    source_installer
+
+    curl() {
+        printf 'HTTP/2 302\r\n'
+        printf 'location: https://github.com/purepoorx/cf_port_test/releases/download/v1.2.3/cfporttest\r\n'
+        local i=0
+        while [ "$i" -lt 100000 ]; do
+            printf 'x-extra-%s: value\r\n' "$i"
+            i=$((i + 1))
+        done
+    }
+
+    local got=""
+    got="$(first_redirect_location "https://example.test/latest/download/cfporttest")"
+
+    assert_eq "$got" "https://github.com/purepoorx/cf_port_test/releases/download/v1.2.3/cfporttest" "first_redirect_location should ignore harmless SIGPIPE from early Location match"
+}
+
 run_tests() {
     local test_name
 
@@ -351,4 +370,5 @@ run_tests \
     test_validate_nginx_conf_d_include_rejects_missing_include \
     test_remove_nginx_config_files_keeps_main_config \
     test_restore_resolver_config_restores_managed_backup \
-    test_restore_resolver_config_skips_unmanaged_resolver
+    test_restore_resolver_config_skips_unmanaged_resolver \
+    test_first_redirect_location_tolerates_early_pipeline_close

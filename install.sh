@@ -182,10 +182,10 @@ http_status_code() {
 
 first_redirect_location() {
     local url="$1"
+    local headers
 
-    curl --silent --show-error --head --connect-timeout 10 --max-time 30 "$url" 2>/dev/null \
-        | tr -d '\r' \
-        | awk 'tolower($1) == "location:" { print $2; exit }'
+    headers="$(curl --silent --show-error --head --connect-timeout 10 --max-time 30 "$url" 2>/dev/null || true)"
+    awk 'tolower($1) == "location:" { location = $2; sub(/\r$/, "", location); print location; exit }' <<< "$headers"
 }
 
 github_api_curl() {
