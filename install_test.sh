@@ -284,6 +284,48 @@ test_remove_nginx_config_files_keeps_main_config() {
     rm -rf "$temp_dir"
 }
 
+test_restore_resolver_config_restores_managed_backup() {
+    source_installer
+
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+    RESOLV_CONF_PATH="${temp_dir}/resolv.conf"
+    DNS64_BACKUP_PATH="${temp_dir}/resolv.conf.cfporttest.bak"
+    printf 'nameserver 1.1.1.1\n' > "$DNS64_BACKUP_PATH"
+    printf '# Managed by cf_port_test install.sh for IPv6-only DNS64+NAT64 access via nat64.net\nnameserver %s\n' "$NAT64_NET_PRIMARY" > "$RESOLV_CONF_PATH"
+
+    run_as_root() {
+        "$@"
+    }
+
+    restore_resolver_config
+
+    assert_eq "$(cat "$RESOLV_CONF_PATH")" "nameserver 1.1.1.1" "managed resolver should be restored from backup"
+    assert_file_missing "$DNS64_BACKUP_PATH" "resolver backup should be consumed after restore"
+    rm -rf "$temp_dir"
+}
+
+test_restore_resolver_config_skips_unmanaged_resolver() {
+    source_installer
+
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+    RESOLV_CONF_PATH="${temp_dir}/resolv.conf"
+    DNS64_BACKUP_PATH="${temp_dir}/resolv.conf.cfporttest.bak"
+    printf 'nameserver 1.1.1.1\n' > "$DNS64_BACKUP_PATH"
+    printf 'nameserver 9.9.9.9\n' > "$RESOLV_CONF_PATH"
+
+    run_as_root() {
+        "$@"
+    }
+
+    restore_resolver_config
+
+    assert_eq "$(cat "$RESOLV_CONF_PATH")" "nameserver 9.9.9.9" "unmanaged resolver should not be overwritten"
+    assert_file_exists "$DNS64_BACKUP_PATH" "backup should remain when resolver is unmanaged"
+    rm -rf "$temp_dir"
+}
+
 run_tests() {
     local test_name
 
@@ -307,4 +349,6 @@ run_tests \
     test_nginx_defaults_use_conf_d_app_config \
     test_nginx_template_is_conf_d_fragment \
     test_validate_nginx_conf_d_include_rejects_missing_include \
-    test_remove_nginx_config_files_keeps_main_config
+    test_remove_nginx_config_files_keeps_main_config \
+    test_restore_resolver_config_restores_managed_backup \
+    test_restore_resolver_config_skips_unmanaged_resolver

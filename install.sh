@@ -491,6 +491,23 @@ configure_nat64_net_dns64() {
     } | run_as_root tee "$RESOLV_CONF_PATH" >/dev/null
 }
 
+resolver_config_is_managed() {
+    [ -f "$RESOLV_CONF_PATH" ] && grep -q '^# Managed by cf_port_test install.sh' "$RESOLV_CONF_PATH"
+}
+
+restore_resolver_config() {
+    [ -f "$DNS64_BACKUP_PATH" ] || return
+
+    if [ -e "$RESOLV_CONF_PATH" ] && ! resolver_config_is_managed; then
+        log "Leaving ${RESOLV_CONF_PATH} unchanged because it is no longer managed by cfporttest."
+        return
+    fi
+
+    log "Restoring resolver configuration from ${DNS64_BACKUP_PATH}..."
+    run_as_root cp "$DNS64_BACKUP_PATH" "$RESOLV_CONF_PATH"
+    run_as_root rm -f "$DNS64_BACKUP_PATH"
+}
+
 ubuntu_codename() {
     if [ -r /etc/os-release ]; then
         # shellcheck source=/dev/null
@@ -972,6 +989,8 @@ uninstall() {
             run_as_root rm -rf "${HOME}/.acme.sh"
         fi
     fi
+
+    restore_resolver_config
 
     log "Uninstall completed."
 }
