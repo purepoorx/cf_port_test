@@ -22,7 +22,10 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests
-        run: go test ./...
+        run: |
+          go test ./...
+          bash -n install.sh
+          bash install_test.sh
 
       - name: Build Linux amd64 binary
         run: GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -buildid=" -o cfporttest ./

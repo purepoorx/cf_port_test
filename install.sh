@@ -27,6 +27,7 @@ WARP_APT_SOURCE_PATH="/etc/apt/sources.list.d/cloudflare-client.list"
 
 SUDO=""
 LAST_LOG_MESSAGE=""
+IPV6_ONLY="${IPV6_ONLY:-0}"
 
 log() {
     LAST_LOG_MESSAGE="$1"
@@ -51,6 +52,60 @@ on_error() {
 }
 
 trap 'on_error $LINENO' ERR
+
+usage() {
+    cat <<'EOF'
+Usage: sudo ./install.sh [options]
+
+Options:
+  --ipv6-only       Allow the installer to configure /etc/resolv.conf with DNS64/NAT64
+                   resolvers when GitHub download connectivity is unavailable.
+  --no-ipv6-only    Disable IPv6-only mode. This is the default.
+  -h, --help        Show this help message.
+EOF
+}
+
+set_ipv6_only_value() {
+    case "$1" in
+        1 | true | TRUE | yes | YES | on | ON)
+            IPV6_ONLY=1
+            ;;
+        0 | false | FALSE | no | NO | off | OFF)
+            IPV6_ONLY=0
+            ;;
+        *)
+            die "Invalid --ipv6-only value: $1"
+            ;;
+    esac
+}
+
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --ipv6-only)
+                IPV6_ONLY=1
+                ;;
+            --ipv6-only=*)
+                set_ipv6_only_value "${1#*=}"
+                ;;
+            --no-ipv6-only)
+                IPV6_ONLY=0
+                ;;
+            -h | --help)
+                usage
+                exit 0
+                ;;
+            *)
+                die "Unknown argument: $1"
+                ;;
+        esac
+        shift
+    done
+}
+
+is_ipv6_only_mode() {
+    [ "$IPV6_ONLY" = "1" ]
+}
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -228,22 +283,41 @@ validate_email() {
     [[ "$domain_part" =~ \.[A-Za-z]{2,}$ ]] || die "Email domain must end with a valid public suffix: ${domain_part}"
 }
 
+validate_domain() {
+    local domain="$1"
+
+    [[ "$domain" != *"'"* ]] || die "Domain must not contain single quotes: ${domain}"
+    [[ "$domain" != *","* ]] || die "Domain must not contain commas: ${domain}"
+    [[ "$domain" != -* ]] || die "Domain label must not start with a hyphen: ${domain}"
+    [[ "$domain" != *.-* ]] || die "Domain label must not start with a hyphen: ${domain}"
+    [[ "$domain" != *-. ]] || die "Domain label must not end with a hyphen: ${domain}"
+    [[ "$domain" =~ ^(\*\.)?([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$ ]] || die "Domain format is invalid: ${domain}"
+}
+
 normalize_domains() {
     local domain
+    local nginx_domains=()
 
     DOMAINS="$(printf '%s' "$DOMAINS" | tr -d '[:space:]')"
     [ -n "$DOMAINS" ] || die "The domain list cannot be empty."
 
     IFS=',' read -r -a domains_array <<< "$DOMAINS"
     ACME_DOMAINS=()
+    CERT_MAIN_DOMAIN=""
+    NGINX_DOMAINS=""
 
     for domain in "${domains_array[@]}"; do
         [ -n "$domain" ] || continue
+        validate_domain "$domain"
         ACME_DOMAINS+=("-d" "$domain")
+        nginx_domains+=("$domain")
+        if [ -z "$CERT_MAIN_DOMAIN" ]; then
+            CERT_MAIN_DOMAIN="$domain"
+        fi
     done
 
     [ "${#ACME_DOMAINS[@]}" -gt 0 ] || die "At least one valid domain is required."
-    CERT_MAIN_DOMAIN="${domains_array[0]}"
+    NGINX_DOMAINS="${nginx_domains[*]}"
 }
 
 install_packages() {
@@ -443,6 +517,11 @@ ensure_ipv4_only_website_access() {
         else
             log "IPv4-only website access is unavailable."
         fi
+    fi
+
+    if ! is_ipv6_only_mode; then
+        log "GitHub download connectivity is unavailable. Leaving ${RESOLV_CONF_PATH} unchanged."
+        die "If this is an IPv6-only server, rerun the installer with --ipv6-only to allow DNS64/NAT64 resolver configuration."
     fi
 
     log "Configuring nat64.net DNS64+NAT64 service..."
@@ -701,7 +780,7 @@ issue_certificate() {
         run_as_root mkdir -p "$ACME_WEBROOT"
         download_repo_file "$RELEASE_REF" "nginx.conf.template" "$NGINX_TEMPLATE_PATH"
         create_self_signed_cert
-        render_nginx_conf "$CERT_MAIN_DOMAIN" "${SSL_DIR}/self-signed.crt" "${SSL_DIR}/self-signed.key"
+        render_nginx_conf "$NGINX_DOMAINS" "${SSL_DIR}/self-signed.crt" "${SSL_DIR}/self-signed.key"
         validate_and_reload_nginx
         run_acme_issue_with_recovery --issue --webroot "$ACME_WEBROOT" "${ACME_DOMAINS[@]}" --force --server letsencrypt || die "Failed to issue the certificate with webroot mode."
         return
@@ -738,7 +817,7 @@ install_certificate_and_nginx() {
         --reloadcmd "$reload_cmd"
 
     download_repo_file "$RELEASE_REF" "nginx.conf.template" "$NGINX_TEMPLATE_PATH"
-    render_nginx_conf "$DOMAINS" "$cert_path" "$key_path"
+    render_nginx_conf "$NGINX_DOMAINS" "$cert_path" "$key_path"
     validate_and_reload_nginx
 }
 
@@ -829,6 +908,8 @@ uninstall() {
 }
 
 main() {
+    parse_args "$@"
+
     log "Welcome to the cf_port_test management script."
     echo "1. Install or update"
     echo "2. Uninstall"
@@ -841,4 +922,6 @@ main() {
     esac
 }
 
-main "$@"
+if [ "${CFPORTTEST_TESTING:-0}" != "1" ]; then
+    main "$@"
+fi

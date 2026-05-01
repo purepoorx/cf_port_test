@@ -39,7 +39,10 @@ jobs:
 
       - name: Run tests
         if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        run: go test ./...
+        run: |
+          go test ./...
+          bash -n install.sh
+          bash install_test.sh
 
       - name: Compute output name
         shell: bash

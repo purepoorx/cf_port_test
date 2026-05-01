@@ -41,7 +41,7 @@ git push origin v1.0.0
 在您的目标服务器上，您只需要运行一个交互式脚本即可完成所有部署和卸载工作。
 
 **前提条件**:
-- 您的服务器是一台主流的 Linux 发行版（如 Ubuntu, Debian, CentOS）。
+- 您的服务器是一台使用 `apt-get` 的 Linux 发行版（如 Ubuntu, Debian）。
 - 您拥有 `sudo` 权限。
 - 您要使用的域名已经全部解析到该服务器的公网 IP 地址（如果使用 Webroot 模式）。
 
@@ -60,6 +60,14 @@ git push origin v1.0.0
     sudo ./install.sh
     ```
     脚本会首先询问您是想 **安装/更新** 还是 **卸载** 应用。
+
+    默认情况下，脚本不会改写 `/etc/resolv.conf`。如果您的服务器是 IPv6-only，并且 GitHub 下载地址不可达，可以显式启用 DNS64/NAT64 兜底：
+
+    ```bash
+    sudo ./install.sh --ipv6-only
+    ```
+
+    启用 `--ipv6-only` 后，只有在 GitHub 下载连通性检查失败时，脚本才会备份 `/etc/resolv.conf` 到 `/etc/resolv.conf.cfporttest.bak`，并写入 nat64.net 的 DNS64 解析器。
 
     -   **如果选择安装**:
         1.  脚本会提示您输入域名、邮箱和可选的版本号。
