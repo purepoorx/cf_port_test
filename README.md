@@ -44,6 +44,7 @@ git push origin v1.0.0
 - 您的服务器是一台使用 `apt-get` 的 Linux 发行版（如 Ubuntu, Debian）。
 - 您拥有 `sudo` 权限。
 - 您要使用的域名已经全部解析到该服务器的公网 IP 地址（如果使用 Webroot 模式）。
+- Nginx 主配置需要包含 `/etc/nginx/conf.d/*.conf`（Ubuntu/Debian 默认如此）。安装脚本只管理 `/etc/nginx/conf.d/cfporttest.conf`，不会覆盖 `/etc/nginx/nginx.conf`。
 
 **使用步骤**:
 
@@ -67,12 +68,12 @@ git push origin v1.0.0
     sudo ./install.sh --ipv6-only
     ```
 
-    启用 `--ipv6-only` 后，只有在 GitHub 下载连通性检查失败时，脚本才会备份 `/etc/resolv.conf` 到 `/etc/resolv.conf.cfporttest.bak`，并写入 nat64.net 的 DNS64 解析器。
+    启用 `--ipv6-only` 后，只有在 GitHub 下载连通性检查失败时，脚本才会备份 `/etc/resolv.conf` 到 `/etc/resolv.conf.cfporttest.bak`，并写入 nat64.net 的 DNS64 解析器。卸载时，如果当前 `/etc/resolv.conf` 仍由本脚本管理，会自动恢复该备份。
 
     -   **如果选择安装**:
         1.  脚本会提示您输入域名、邮箱和可选的版本号。
         2.  接着，它会请您选择证书申请模式：
-            - **Webroot 模式**: 推荐使用。它安全、简单，且不会中断服务。需要确保您服务器的 80 端口可以被公网访问。
+            - **Webroot 模式**: 推荐使用。它安全、简单，且不会中断服务。需要确保您服务器的 80 端口可以被公网访问。通配符域名（如 `*.example.com`）不能使用 Webroot 模式。
             - **DNS 模式**: 当您需要申请通配符证书，或者您的服务器在防火墙后（80 端口不开放）时使用。此模式需要您提供 DNS 提供商的 API 密钥。脚本会给出文档链接供您查询。
         3.  根据您的选择，脚本会自动完成所有部署工作。
 
