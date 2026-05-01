@@ -799,6 +799,46 @@ remove_nginx_config_files() {
     run_as_root rm -f "$NGINX_CONFIG_PATH" "$NGINX_TEMPLATE_PATH"
 }
 
+validate_acme_http_challenge_path() {
+    local token="cfporttest-preflight-$RANDOM-$$"
+    local expected="cfporttest-ok"
+    local challenge_dir="${ACME_WEBROOT}/.well-known/acme-challenge"
+    local challenge_file="${challenge_dir}/${token}"
+    local domain
+    local body
+    local probe_error=""
+
+    run_as_root mkdir -p "$challenge_dir"
+    printf '%s' "$expected" | run_as_root tee "$challenge_file" >/dev/null
+    run_as_root chmod 0644 "$challenge_file" || true
+
+    for domain in "${NORMALIZED_DOMAINS[@]}"; do
+        if ! body="$(curl --silent --show-error --max-time 10 --resolve "${domain}:80:127.0.0.1" "http://${domain}/.well-known/acme-challenge/${token}" 2>/dev/null)"; then
+            probe_error="Local ACME challenge probe failed for ${domain}. Check that nginx is listening on port 80 and serving ${NGINX_CONFIG_PATH}."
+            break
+        fi
+
+        if [ "$body" != "$expected" ]; then
+            probe_error="Local ACME challenge probe returned unexpected content for ${domain}. Check nginx server_name and webroot mapping."
+            break
+        fi
+
+        if ! body="$(curl --silent --show-error --max-time 15 "http://${domain}/.well-known/acme-challenge/${token}" 2>/dev/null)"; then
+            log "Public ACME challenge probe could not be completed from this server for ${domain}. Continuing with Let's Encrypt validation."
+            continue
+        fi
+
+        if [ "$body" != "$expected" ]; then
+            probe_error="Public ACME challenge probe returned unexpected content for ${domain}. Ensure DNS points to this server, port 80 is reachable from the internet, Cloudflare proxy/rules are not serving another origin, and no other nginx server block handles this domain."
+            break
+        fi
+    done
+
+    run_as_root rm -f "$challenge_file"
+
+    [ -z "$probe_error" ] || die "$probe_error"
+}
+
 setup_service() {
     log "Configuring systemd service..."
     run_as_root systemctl stop "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
@@ -865,6 +905,7 @@ issue_certificate() {
         create_self_signed_cert
         render_nginx_conf "$NGINX_DOMAINS" "${SSL_DIR}/self-signed.crt" "${SSL_DIR}/self-signed.key"
         validate_and_reload_nginx
+        validate_acme_http_challenge_path
         run_acme_issue_with_recovery --issue --webroot "$ACME_WEBROOT" "${ACME_DOMAINS[@]}" --force --server letsencrypt || die "Failed to issue the certificate with webroot mode."
         return
     fi

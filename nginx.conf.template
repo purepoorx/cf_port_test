@@ -3,8 +3,10 @@
         listen [::]:80;
         server_name {{DOMAINS}};
 
-        location /.well-known/acme-challenge/ {
+        location ^~ /.well-known/acme-challenge/ {
             root /var/www/acme;
+            default_type text/plain;
+            try_files $uri =404;
         }
 
         location / {

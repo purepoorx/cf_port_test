@@ -237,6 +237,8 @@ test_nginx_template_is_conf_d_fragment() {
     template="$(cat "${ROOT_DIR}/nginx.conf.template")"
 
     assert_contains "$template" "server {" "nginx fragment should contain server blocks"
+    assert_contains "$template" "location ^~ /.well-known/acme-challenge/" "nginx fragment should give ACME challenge location precedence"
+    assert_contains "$template" 'try_files $uri =404;' "nginx fragment should explicitly serve ACME challenge files"
     assert_not_contains "$template" "worker_processes" "nginx fragment should not contain global directives"
     assert_not_contains "$template" "events {" "nginx fragment should not contain an events block"
     assert_not_contains "$template" "http {" "nginx fragment should not contain an http block"
@@ -404,6 +406,63 @@ test_install_certificate_downloads_nginx_template_from_support_ref() {
     rm -rf "$temp_dir"
 }
 
+test_validate_acme_http_challenge_path_fails_on_public_mismatch() {
+    source_installer
+
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+    ACME_WEBROOT="${temp_dir}/acme"
+    NORMALIZED_DOMAINS=("example.com")
+
+    run_as_root() {
+        "$@"
+    }
+
+    curl() {
+        local args="$*"
+        local url="${*: -1}"
+        local token="${url##*/}"
+
+        if [[ "$args" == *"--resolve"* ]]; then
+            cat "${ACME_WEBROOT}/.well-known/acme-challenge/${token}"
+            return
+        fi
+
+        printf 'not found'
+    }
+
+    local output=""
+    if output="$(validate_acme_http_challenge_path 2>&1)"; then
+        fail "ACME preflight should fail when public domain serves the wrong content"
+    fi
+
+    assert_contains "$output" "Public ACME challenge probe returned unexpected content" "public mismatch error should explain the failed layer"
+    rm -rf "$temp_dir"
+}
+
+test_validate_acme_http_challenge_path_passes_when_local_and_public_match() {
+    source_installer
+
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+    ACME_WEBROOT="${temp_dir}/acme"
+    NORMALIZED_DOMAINS=("example.com")
+
+    run_as_root() {
+        "$@"
+    }
+
+    curl() {
+        local url="${*: -1}"
+        local token="${url##*/}"
+        cat "${ACME_WEBROOT}/.well-known/acme-challenge/${token}"
+    }
+
+    validate_acme_http_challenge_path
+
+    rm -rf "$temp_dir"
+}
+
 run_tests() {
     local test_name
 
@@ -432,4 +491,6 @@ run_tests \
     test_restore_resolver_config_skips_unmanaged_resolver \
     test_first_redirect_location_tolerates_early_pipeline_close \
     test_setup_service_downloads_support_file_from_support_ref \
-    test_install_certificate_downloads_nginx_template_from_support_ref
+    test_install_certificate_downloads_nginx_template_from_support_ref \
+    test_validate_acme_http_challenge_path_fails_on_public_mismatch \
+    test_validate_acme_http_challenge_path_passes_when_local_and_public_match
